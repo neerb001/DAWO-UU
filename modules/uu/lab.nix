@@ -28,6 +28,9 @@
       networking.hostName = lib.mkDefault "";
 
       # Uitrol vanuit de beheer-VM via DAWO's deploy-gebruiker (deploy-rs).
+      # users-deploy maakt een systeemaccount zonder login-shell (nologin), waardoor
+      # deploy-rs niet kan inloggen; geef het hier de standaard-shell.
+      users.users.deploy.useDefaultShell = true;
       users.users.deploy.openssh.authorizedKeys.keyFiles = [
         ../../uu/keys/uu-beheer-vm.pub
         ../../uu/keys/lab-automation.pub
