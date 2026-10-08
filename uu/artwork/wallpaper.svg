@@ -1,10 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="3840" height="2160" viewBox="0 0 3840 2160">
-  <!-- UU-huisstijlkleuren: geel #FFCD00, rood #C00A35, zwart. Geen officieel logo. -->
-  <rect width="3840" height="2160" fill="#111111"/>
-  <polygon points="0,1500 1700,1500 1300,2160 0,2160" fill="#FFCD00"/>
-  <polygon points="1700,1500 1760,1500 1360,2160 1300,2160" fill="#C00A35"/>
-  <circle cx="3200" cy="560" r="900" fill="#FFCD00" fill-opacity="0.06"/>
-  <circle cx="3200" cy="560" r="560" fill="#FFCD00" fill-opacity="0.06"/>
-  <text x="200" y="1760" font-family="Inter" font-weight="800" font-size="150" fill="#111111">Universiteit Utrecht</text>
-  <text x="200" y="1930" font-family="Inter" font-weight="500" font-size="80" fill="#111111">Digitale werkplek · DAWO-UU</text>
+  <!-- UU-huisstijlkleuren: geel #FFCD00, rood #C00A35. Geen officieel logo. -->
+  <defs>
+    <radialGradient id="bg" cx="0.35" cy="0.4" r="0.9">
+      <stop offset="0" stop-color="#2B2B2B"/>
+      <stop offset="1" stop-color="#121212"/>
+    </radialGradient>
+  </defs>
+  <rect width="3840" height="2160" fill="url(#bg)"/>
+
+  <!-- Rustige concentrische bogen rechtsonder -->
+  <g fill="none" stroke="#FFCD00" stroke-width="3">
+    <circle cx="3840" cy="2160" r="700" stroke-opacity="0.40"/>
+    <circle cx="3840" cy="2160" r="1000" stroke-opacity="0.28"/>
+    <circle cx="3840" cy="2160" r="1300" stroke-opacity="0.18"/>
+    <circle cx="3840" cy="2160" r="1600" stroke-opacity="0.11"/>
+    <circle cx="3840" cy="2160" r="1900" stroke-opacity="0.06"/>
+  </g>
+
+  <!-- Woordmerk linksonder -->
+  <rect x="220" y="1792" width="12" height="148" fill="#FFCD00"/>
+  <text x="270" y="1862" font-family="Inter" font-weight="700" font-size="76" fill="#FFFFFF">Universiteit Utrecht</text>
+  <text x="272" y="1930" font-family="Inter" font-weight="400" font-size="42" fill="#FFCD00" letter-spacing="1">Digitale werkplek</text>
 </svg>
