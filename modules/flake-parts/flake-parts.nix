@@ -11,5 +11,9 @@
   #
   # The images are x86_64 laptops. Add an architecture here when there is one to
   # build for, not before.
-  systems = [ "x86_64-linux" ];
+  systems = [
+    "x86_64-linux"
+    # DAWO-UU: de lab-werkplekken draaien als VM op Apple Silicon.
+    "aarch64-linux"
+  ];
 }

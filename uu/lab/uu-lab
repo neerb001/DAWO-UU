@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# DAWO-UU-lab: UU-werkplekken als VM's op een Mac (Apple Silicon), beheerd vanuit
+# een NixOS-beheer-VM die bouwt en uitrolt met deploy-rs (DAWO's eigen route).
+#
+#   uu/lab/uu-lab image              basis-image bouwen in de beheer-VM (eenmalig)
+#   uu/lab/uu-lab up [werkplek..]    werkplek-VM's starten, elk in een eigen venster
+#   uu/lab/uu-lab deploy [werkplek..] repo naar de beheer-VM en uitrollen (deploy-rs)
+#   uu/lab/uu-lab status             per werkplek: naam, revisie, actieve configuratie
+#   uu/lab/uu-lab ssh <werkplek>     inloggen als deploy-gebruiker
+#   uu/lab/uu-lab down               werkplekken afsluiten
+#   uu/lab/uu-lab destroy [werkplek] werkplek(ken) weggooien (basis-image blijft)
+#
+# Werkplekken: uu-medewerker, uu-flexplek. Zie uu/lab/README.md voor de opzet.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+STATE="${UU_LAB_DIR:-$REPO/.lab}"
+KEY="${UU_LAB_KEY:?zet UU_LAB_KEY op de SSH-sleutel voor de beheer-VM en de werkplekken}"
+CONTROL="${UU_LAB_CONTROL:-tim@127.0.0.1}"
+CONTROL_PORT="${UU_LAB_CONTROL_PORT:-2222}"
+QEMU_SHARE="$(brew --prefix qemu)/share/qemu"
+SSH_OPTS=(-i "$KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5)
+
+# naam  ssh-poort  geheugen(MB)
+WERKPLEKKEN="uu-medewerker 2211 3072
+uu-flexplek 2212 3072"
+
+die() { echo "fout: $*" >&2; exit 1; }
+port_of() { awk -v n="$1" '$1 == n { print $2 }' <<<"$WERKPLEKKEN"; }
+mem_of() { awk -v n="$1" '$1 == n { print $3 }' <<<"$WERKPLEKKEN"; }
+all() { awk '{ print $1 }' <<<"$WERKPLEKKEN"; }
+running() { [[ -f "$STATE/$1.pid" ]] && kill -0 "$(cat "$STATE/$1.pid")" 2>/dev/null; }
+
+control() { ssh "${SSH_OPTS[@]}" -p "$CONTROL_PORT" "$CONTROL" "$@"; }
+wp_ssh() {
+  local p; p="$(port_of "$1")"; shift
+  [[ -n "$p" ]] || die "onbekende werkplek (kies uit: $(all | tr '\n' ' '))"
+  ssh "${SSH_OPTS[@]}" -p "$p" deploy@127.0.0.1 "$@"
+}
+
+sync_repo() {
+  control true 2>/dev/null || die "beheer-VM niet bereikbaar op $CONTROL:$CONTROL_PORT"
+  rsync -a --delete --exclude .lab -e "ssh ${SSH_OPTS[*]} -p $CONTROL_PORT" "$REPO/" "$CONTROL:dawo-uu/"
+}
+
+cmd_image() {
+  sync_repo
+  echo "==> basis-image (hosts/uu-lab-base) bouwen in de beheer-VM"
+  control 'cd ~/dawo-uu && nix build .#nixosConfigurations.uu-lab-base.config.system.build.image --out-link ~/uu-lab-image -L 2>&1 | tail -3'
+  mkdir -p "$STATE"
+  scp "${SSH_OPTS[@]}" -P "$CONTROL_PORT" "$CONTROL:$(control 'readlink -f ~/uu-lab-image/*.qcow2')" "$STATE/base.qcow2"
+  chmod u+w "$STATE/base.qcow2"
+}
+
+start_one() {
+  local name="$1" port mem disk vars
+  port="$(port_of "$name")"; mem="$(mem_of "$name")"
+  [[ -n "$port" ]] || die "onbekende werkplek: $name"
+  running "$name" && { echo "$name draait al"; return 0; }
+  disk="$STATE/$name.qcow2"; vars="$STATE/$name-vars.fd"
+  if [[ ! -f "$disk" ]]; then
+    qemu-img create -q -f qcow2 -b "$STATE/base.qcow2" -F qcow2 "$disk" 40G
+    cp "$QEMU_SHARE/edk2-arm-vars.fd" "$vars"; truncate -s 64M "$vars"
+  fi
+  nohup qemu-system-aarch64 \
+    -name "$name" \
+    -machine virt,highmem=on -accel hvf -cpu host -smp 4 -m "$mem" \
+    -drive "if=pflash,format=raw,readonly=on,file=$QEMU_SHARE/edk2-aarch64-code.fd" \
+    -drive "if=pflash,format=raw,file=$vars" \
+    -drive "if=virtio,format=qcow2,file=$disk,discard=unmap" \
+    -netdev "user,id=net0,hostfwd=tcp:127.0.0.1:$port-:22" -device virtio-net-pci,netdev=net0 \
+    -device virtio-rng-pci \
+    -device virtio-gpu-pci,xres=1600,yres=1000 \
+    -display cocoa,zoom-to-fit=on,show-cursor=on \
+    -device qemu-xhci -device usb-kbd -device usb-tablet \
+    -chardev qemu-vdagent,id=vdagent,clipboard=on \
+    -device virtio-serial-pci -device virtserialport,chardev=vdagent,name=com.redhat.spice.0 \
+    -smbios "type=11,value=io.systemd.credential:system.hostname=$name" \
+    -serial "file:$STATE/$name-serial.log" \
+    -monitor "unix:$STATE/$name-monitor.sock,server,nowait" \
+    -pidfile "$STATE/$name.pid" > "$STATE/$name-qemu.log" 2>&1 &
+  disown
+}
+
+cmd_up() {
+  [[ -f "$STATE/base.qcow2" ]] || cmd_image
+  local targets=("$@"); [[ ${#targets[@]} -gt 0 ]] || targets=($(all))
+  for n in "${targets[@]}"; do echo "==> $n starten"; start_one "$n"; done
+  echo "==> wachten op SSH"
+  for n in "${targets[@]}"; do
+    for _ in $(seq 120); do wp_ssh "$n" true </dev/null 2>/dev/null && break; sleep 2; done
+    wp_ssh "$n" true </dev/null 2>/dev/null || die "$n kwam niet op (zie $STATE/$n-serial.log)"
+    echo "    $n bereikbaar"
+  done
+}
+
+cmd_deploy() {
+  sync_repo
+  local targets=("$@"); [[ ${#targets[@]} -gt 0 ]] || targets=($(all))
+  for n in "${targets[@]}"; do
+    echo "==> $n uitrollen"
+    control "cd ~/dawo-uu && nix develop -c deploy --skip-checks --hostname 10.0.2.2 --ssh-opts '-p $(port_of "$n")' .#$n" </dev/null
+  done
+}
+
+cmd_status() {
+  printf '%-14s %-10s %-11s %s\n' WERKPLEK TYPE REVISIE CONFIGURATIE
+  for n in $(all); do
+    if ! running "$n"; then printf '%-14s %s\n' "$n" "(gestopt)"; continue; fi
+    wp_ssh "$n" '
+      t=$(sed -n "s/.*\"werkplek\":\"\([^\"]*\)\".*/\1/p" /etc/dawo-uu/info.json 2>/dev/null)
+      r=$(sed -n "s/.*\"revisie\":\"\([^\"]*\)\".*/\1/p" /etc/dawo-uu/info.json 2>/dev/null)
+      p=$(basename "$(readlink /run/current-system)")
+      printf "%-14s %-10s %-11s %s\n" "$(hostname)" "${t:-basis}" "${r:--}" "${p:0:8} ${p:33}"' </dev/null 2>/dev/null \
+      || printf '%-14s %s\n' "$n" "(onbereikbaar)"
+  done
+}
+
+cmd_ssh() {
+  [[ $# -ge 1 ]] || die "gebruik: uu-lab ssh <werkplek> [commando]"
+  local n="$1"; shift
+  if [[ $# -gt 0 ]]; then wp_ssh "$n" "$@"; else wp_ssh "$n" -t; fi
+}
+
+cmd_down() {
+  for n in $(all); do
+    running "$n" || continue
+    # Netjes afsluiten via ACPI (zoals de aan/uit-knop), na 60 s hard.
+    echo system_powerdown | nc -U -w 1 "$STATE/$n-monitor.sock" >/dev/null 2>&1 || true
+    for _ in $(seq 60); do running "$n" || break; sleep 1; done
+    running "$n" && kill "$(cat "$STATE/$n.pid")" 2>/dev/null
+    rm -f "$STATE/$n.pid"; echo "$n gestopt"
+  done
+}
+
+cmd_destroy() {
+  local targets=("$@"); [[ ${#targets[@]} -gt 0 ]] || targets=($(all))
+  for n in "${targets[@]}"; do
+    if running "$n"; then kill "$(cat "$STATE/$n.pid")"; sleep 1; fi
+    rm -f "$STATE/$n.qcow2" "$STATE/$n-vars.fd" "$STATE/$n.pid" "$STATE/$n-serial.log" "$STATE/$n-qemu.log"
+    echo "$n verwijderd"
+  done
+}
+
+case "${1:-}" in
+  image|up|deploy|status|ssh|down|destroy) c="$1"; shift; "cmd_$c" "$@" ;;
+  *) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="3840" height="2160" viewBox="0 0 3840 2160">
+  <!-- UU-huisstijlkleuren: geel #FFCD00, rood #C00A35, zwart. Geen officieel logo. -->
+  <rect width="3840" height="2160" fill="#111111"/>
+  <polygon points="0,1500 1700,1500 1300,2160 0,2160" fill="#FFCD00"/>
+  <polygon points="1700,1500 1760,1500 1360,2160 1300,2160" fill="#C00A35"/>
+  <circle cx="3200" cy="560" r="900" fill="#FFCD00" fill-opacity="0.06"/>
+  <circle cx="3200" cy="560" r="560" fill="#FFCD00" fill-opacity="0.06"/>
+  <text x="200" y="1760" font-family="Inter" font-weight="800" font-size="150" fill="#111111">Universiteit Utrecht</text>
+  <text x="200" y="1930" font-family="Inter" font-weight="500" font-size="80" fill="#111111">Digitale werkplek · DAWO-UU</text>
+</svg>
